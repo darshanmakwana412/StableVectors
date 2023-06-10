@@ -1,7 +1,8 @@
 """
 Here are some use cases:
-python main.py --config config/all.yaml --experiment experiment_8x1 --signature demo1 --target data/demo1.png
+python main.py --config config.yaml --experiment experiment_8x1 --signature demo2 --target demo1.jpg
 """
+
 import pydiffvg
 import torch
 import cv2
@@ -14,6 +15,8 @@ from tqdm import tqdm
 from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR
 from torch.nn.functional import adaptive_avg_pool2d
 import warnings
+import clip_utils
+import torchvision
 warnings.filterwarnings("ignore")
 
 import PIL
@@ -384,6 +387,7 @@ if __name__ == "__main__":
     if cfg.use_ycrcb:
         gt = ycrcb_conversion(gt)
     h, w = gt.shape[2:]
+    h, w = 336, 336
 
     path_schedule = get_path_schedule(**cfg.path_schedule)
 
@@ -433,6 +437,9 @@ if __name__ == "__main__":
     lrlambda_f = linear_decay_lrlambda_f(cfg.num_iter, 0.4)
     optim_schedular_dict = {}
 
+    # Embed prompt
+    text_features = clip_utils.embed_text("a brown tree in the center of the screen with blue sky and green grasses")
+
     for path_idx, pathn in enumerate(path_schedule):
         loss_list = []
         print("=> Adding [{}] paths, [{}] ...".format(pathn, cfg.seginit.type))
@@ -445,8 +452,7 @@ if __name__ == "__main__":
                 pathn, cfg.num_segments, (h, w),
                 cfg.seginit, len(shapes_record),
                 pos_init_method,
-                trainable_stroke=True,
-                gt=gt, )
+                trainable_stroke=True)
             para_stroke_width[path_idx] = stroke_width_var
             para_stroke_color[path_idx] = stroke_color_var
         else:
@@ -454,8 +460,7 @@ if __name__ == "__main__":
                 pathn, cfg.num_segments, (h, w),
                 cfg.seginit, len(shapes_record),
                 pos_init_method,
-                trainable_stroke=False,
-                gt=gt, )
+                trainable_stroke=False)
 
         shapes_record += shapes
         shape_groups_record += shape_groups
@@ -523,7 +528,8 @@ if __name__ == "__main__":
                 color_reweight = torch.FloatTensor([255/219, 255/224, 255/255]).to(device)
                 loss = ((x-gt)*(color_reweight.view(1, -1, 1, 1)))**2
             else:
-                loss = ((x-gt)**2)
+                # loss = ((x-gt)**2)
+                loss = 0 
 
             if cfg.loss.use_l1_loss:
                 loss = abs(x-gt)
@@ -586,18 +592,27 @@ if __name__ == "__main__":
 
 
 
-            if loss_weight is None:
-                loss = loss.sum(1).mean()
-            else:
-                loss = (loss.sum(1)*loss_weight).mean()
+            # if loss_weight is None:
+            #     loss = loss.sum(1).mean()
+            # else:
+            #     loss = (loss.sum(1)*loss_weight).mean()
 
             # if (cfg.loss.bis_loss_weight is not None)  and (cfg.loss.bis_loss_weight > 0):
             #     loss_bis = bezier_intersection_loss(point_var[0]) * cfg.loss.bis_loss_weight
             #     loss = loss + loss_bis
-            if (cfg.loss.xing_loss_weight is not None) \
-                    and (cfg.loss.xing_loss_weight > 0):
-                loss_xing = xing_loss(point_var) * cfg.loss.xing_loss_weight
-                loss = loss + loss_xing
+            # if (cfg.loss.xing_loss_weight is not None) \
+            #         and (cfg.loss.xing_loss_weight > 0):
+            #     loss_xing = xing_loss(point_var) * cfg.loss.xing_loss_weight
+            #     loss = loss + loss_xing
+
+            transforms = torchvision.transforms.Compose([
+                torchvision.transforms.RandomPerspective(),
+                torchvision.transforms.RandomResizedCrop(size=(512, 512))
+            ])
+
+            image_features = clip_utils.embed_image(x)
+            loss = - torch.cosine_similarity(text_features, image_features, dim=-1).mean()
+            # print('render loss:', loss.item())
 
 
             loss_list.append(loss.item())
@@ -646,7 +661,7 @@ if __name__ == "__main__":
         # loss_weight = torch.softmax(region_loss.reshape(1, 1, -1), dim=-1)\
         #     .reshape_as(region_loss)
 
-        pos_init_method = naive_coord_init(x, gt)
+        # pos_init_method = naive_coord_init(x, gt)
 
         if cfg.coord_init.type == 'naive':
             pos_init_method = naive_coord_init(x, gt)
