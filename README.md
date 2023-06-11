@@ -2,6 +2,8 @@
 
 Generate Stable Vector graphics representations from text prompts using CLIP + DiffVG
 
+![model_architecture](./assets/model_architecture.png)
+
 # Installation
 
 Use a conda environment
