@@ -102,17 +102,10 @@ def parse_args():
     parser.add_argument('--signature', nargs='+', type=str)
     parser.add_argument('--seginit', nargs='+', type=str)
     parser.add_argument("--num_segments", type=int, default=4)
+    parser.add_argument("--prompt", type=str, default=None)
+    parser.add_argument("--num_iter", type=int, default=200)
     # parser.add_argument("--num_paths", type=str, default="1,1,1")
-    # parser.add_argument("--num_iter", type=int, default=500)
-    # parser.add_argument('--free', action='store_true')
-    # Please ensure that image resolution is divisible by pool_size; otherwise the performance would drop a lot.
-    # parser.add_argument('--pool_size', type=int, default=40, help="the pooled image size for next path initialization")
-    # parser.add_argument('--save_loss', action='store_true')
-    # parser.add_argument('--save_init', action='store_true')
-    # parser.add_argument('--save_image', action='store_true')
-    # parser.add_argument('--save_video', action='store_true')
-    # parser.add_argument('--print_weight', action='store_true')
-    # parser.add_argument('--circle_init_radius',  type=float)
+
     cfg = edict()
     args = parser.parse_args()
     cfg.debug = args.debug
@@ -123,6 +116,7 @@ def parse_args():
     cfg.log_dir = args.log_dir
     cfg.initial = args.initial
     cfg.signature = args.signature
+    cfg.num_iter = args.num_iter
     # set cfg num_segments in command
     cfg.num_segments = args.num_segments
     if args.seginit is not None:
@@ -130,7 +124,7 @@ def parse_args():
         cfg.seginit.type = args.seginit[0]
         if cfg.seginit.type == 'circle':
             cfg.seginit.radius = float(args.seginit[1])
-    return cfg
+    return cfg, args.prompt
 
 def ycrcb_conversion(im, format='[bs x 3 x 2D]', reverse=False):
     mat = torch.FloatTensor([
@@ -354,7 +348,7 @@ if __name__ == "__main__":
     # make config #
     ###############
 
-    cfg_arg = parse_args()
+    cfg_arg, prompt = parse_args()
     with open(cfg_arg.config, 'r') as f:
         cfg = yaml.load(f, Loader=yaml.FullLoader)
     cfg_default = edict(cfg['default'])
@@ -438,7 +432,7 @@ if __name__ == "__main__":
     optim_schedular_dict = {}
 
     # Embed prompt
-    text_features = clip_utils.embed_text("a brown tree in the center of the screen with blue sky and green grasses")
+    text_features = clip_utils.embed_text(prompt)
 
     for path_idx, pathn in enumerate(path_schedule):
         loss_list = []
@@ -588,23 +582,6 @@ if __name__ == "__main__":
                 plt.savefig(filename, dpi=800)
                 plt.close()
 
-
-
-
-
-            # if loss_weight is None:
-            #     loss = loss.sum(1).mean()
-            # else:
-            #     loss = (loss.sum(1)*loss_weight).mean()
-
-            # if (cfg.loss.bis_loss_weight is not None)  and (cfg.loss.bis_loss_weight > 0):
-            #     loss_bis = bezier_intersection_loss(point_var[0]) * cfg.loss.bis_loss_weight
-            #     loss = loss + loss_bis
-            # if (cfg.loss.xing_loss_weight is not None) \
-            #         and (cfg.loss.xing_loss_weight > 0):
-            #     loss_xing = xing_loss(point_var) * cfg.loss.xing_loss_weight
-            #     loss = loss + loss_xing
-
             transforms = torchvision.transforms.Compose([
                 torchvision.transforms.RandomPerspective(),
                 torchvision.transforms.RandomResizedCrop(size=(512, 512))
@@ -612,8 +589,6 @@ if __name__ == "__main__":
 
             image_features = clip_utils.embed_image(x)
             loss = - torch.cosine_similarity(text_features, image_features, dim=-1).mean()
-            # print('render loss:', loss.item())
-
 
             loss_list.append(loss.item())
             t_range.set_postfix({'loss': loss.item()})
